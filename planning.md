@@ -261,8 +261,29 @@ For Milestone 4 app wiring, I will use Claude or Copilot to help implement handl
  **Milestone 6 documentation**
   I will use ChatGPT to help organize the README after the code is working. I will give it my final planning.md, notes from testing, and examples of successful and failed runs. I expect it to help draft the tool inventory, planning loop explanation, state management description, error handling examples, spec reflection, and AI usage section. I will verify the README by checking that every documented function name, parameter, and return value matches the actual code before submitting.
 
- **Stretch Features**
-  I will update planning.md before implementing each stretch feature. I will use Claude to help implement the price comparison tool, style profile memory, trend awareness, and retry logic with fallback one at a time. I will verify each stretch feature separately before connecting it into the agent loop, and I will confirm that the required three-tool workflow still works after each stretch feature is added.
+## Stretch Feature Plan: Retry Logic with Fallback
+
+If `search_listings()` returns no results, the agent will retry once with loosened constraints before giving up. The first fallback will remove the size filter while keeping the description and max price the same. If the retry returns results, the agent will store those results in `session["search_results"]`, select the top result, and store a message in `session["fallback_message"]` explaining that the size filter was removed. If the retry still returns no results, the agent will store the normal no-results error and stop before calling `suggest_outfit()` or `create_fit_card()`.
+
+This keeps the planning loop conditional because the fallback only runs when the original search returns an empty list. The agent still avoids calling later tools when both the original search and fallback search fail.
+
+**Stretch Feature 2: Price Comparison Tool**
+
+I will add a fourth tool named compare_price(new_item, similar_items) that estimates whether the selected listing price is fair compared to other similar listings in the mock dataset. The tool will accept the selected listing and a list of comparable listings, then return a short string such as "This price looks fair" or "This is cheaper than similar listings", including the selected item price and the average comparable price when possible.
+
+The agent will call this tool only after a listing has been selected. The result will be stored in session["price_comparison"] and can be shown in the listing panel or fit card output. If there are not enough similar items to compare against, the tool will return a helpful message instead of failing.
+
+**Stretch Feature 3: Style Profile Memory**
+
+I will add simple style profile memory inside the session. The agent will infer lightweight style preferences from the user query and wardrobe, such as "vintage", "grunge", "streetwear", "y2k", or "classic". These preferences will be stored in session["style_profile"].
+
+The outfit tool can use this profile as extra context when suggesting an outfit. If no clear style preference is found, the agent will continue without it. This keeps the feature optional and avoids blocking the main workflow.
+
+**Stretch Feature 4: Trend Awareness**
+
+I will add a check_trends(description) tool that uses a small local list of trend keywords instead of an external API. The tool will compare the user’s search description against trend terms such as "y2k", "grunge", "vintage", "streetwear", "coquette", and "western". It will return a short trend note if the item matches one of those styles.
+
+The agent will call this after selecting an item and store the result in session["trend_note"]. If no trend match is found, it will return a neutral message like "No specific trend match found, but the item can still be styled normally." This keeps the tool useful without depending on live web data.
 
 ---
 

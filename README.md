@@ -1,61 +1,436 @@
-# FitFindr — Starter Kit
+# FitFindr
 
-This starter kit contains everything you need to begin Project 2.
+FitFindr is a multi-tool AI agent that helps a user find secondhand clothing listings, style the selected item with their wardrobe, and generate a short shareable fit card. The agent uses a planning loop instead of blindly calling every tool every time. If search fails, it stops or uses a fallback instead of passing empty data into later tools.
 
-## What's Included
+## Project Overview
 
+A user can type a natural language request such as:
+
+```text
+vintage graphic tee under $30
 ```
-ai201-project2-fitfindr-starter/
-├── data/
-│   ├── listings.json          # 40 mock secondhand listings
-│   └── wardrobe_schema.json   # Wardrobe format + example wardrobe
-├── utils/
-│   └── data_loader.py         # Helper functions for loading the data
-├── planning.md                # Your planning template — fill this out first
-└── requirements.txt           # Python dependencies
-```
+
+FitFindr then:
+
+1. Parses the request into a search description, optional size, and optional max price.
+2. Searches the local mock listings dataset.
+3. Stores the selected listing in session state.
+4. Suggests an outfit using the selected listing and the user's wardrobe.
+5. Generates a shareable fit card/caption.
+6. Adds stretch-feature information such as price comparison, trend notes, style profile, and fallback messaging when available.
+
+The app uses Gradio for the interface and Groq `llama-3.3-70b-versatile` for the LLM-powered outfit and fit card generation.
 
 ## Setup
+
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Set your Groq API key in a `.env` file (get a free key at [console.groq.com](https://console.groq.com)):
-```
+Create a `.env` file in the repo root:
+
+```text
 GROQ_API_KEY=your_key_here
 ```
 
-## The Mock Listings Dataset
+Run tests:
 
-`data/listings.json` contains 40 mock secondhand listings across categories (tops, bottoms, outerwear, shoes, accessories) and styles (vintage, y2k, grunge, cottagecore, streetwear, and more).
-
-Each listing has: `id`, `title`, `description`, `category`, `style_tags`, `size`, `condition`, `price`, `colors`, `brand`, and `platform`.
-
-Load it with:
-```python
-from utils.data_loader import load_listings
-listings = load_listings()
+```bash
+python3 -m pytest tests/
 ```
 
-## The Wardrobe Schema
+Run the app:
 
-`data/wardrobe_schema.json` defines the format your agent uses to represent a user's existing wardrobe. It includes:
-
-- `schema`: field definitions for a wardrobe item
-- `example_wardrobe`: a sample wardrobe with 10 items you can use for testing
-- `empty_wardrobe`: a starting template for a new user
-
-Load an example wardrobe with:
-```python
-from utils.data_loader import get_example_wardrobe
-wardrobe = get_example_wardrobe()
+```bash
+python3 app.py
 ```
 
-## Where to Start
+Then open the localhost URL shown in the terminal.
 
-1. **Read `planning.md` and fill it out before writing any code.**
-2. Verify the data loads correctly by running `python utils/data_loader.py`.
-3. Build and test each tool individually before connecting them through your planning loop.
+## Tool Inventory
 
-Your implementation files go in this same directory. There's no required file structure for your agent code — organize it however makes sense for your design.
+### 1. `search_listings(description, size=None, max_price=None)`
+
+**File:** `tools.py`
+
+**Inputs:**
+
+* `description` (`str`): The item or style the user is searching for.
+* `size` (`str | None`): Optional size filter such as `"M"`, `"8"`, or `"XXS"`.
+* `max_price` (`float | None`): Optional maximum price.
+
+**Output:**
+
+* `list[dict]`: A list of matching listing dictionaries sorted by relevance and price.
+* Returns `[]` when no matching listings are found.
+
+**Purpose:**
+This tool searches the local `data/listings.json` mock dataset. It filters by price and size, then ranks listings using weighted relevance scoring. Style tags and titles are weighted more strongly than random description mentions so that a query like `"graphic tee"` ranks actual graphic tee listings above listings that only mention graphic tees in passing.
+
+**Failure handling:**
+If no listings match, it returns an empty list instead of crashing. The agent then either retries with loosened constraints or returns a helpful error message.
+
+---
+
+### 2. `suggest_outfit(new_item, wardrobe)`
+
+**File:** `tools.py`
+
+**Inputs:**
+
+* `new_item` (`dict`): The selected listing from `search_listings`.
+* `wardrobe` (`dict`): The user's wardrobe data, usually from `get_example_wardrobe()` or `get_empty_wardrobe()`.
+
+**Output:**
+
+* `str`: An outfit suggestion.
+
+**Purpose:**
+This tool uses the selected secondhand item and the user's wardrobe to suggest a complete outfit. It calls Groq's `llama-3.3-70b-versatile` model.
+
+**Failure handling:**
+If the wardrobe is empty, the tool still returns general styling advice instead of crashing. This supports new users who do not have saved wardrobe items yet.
+
+---
+
+### 3. `create_fit_card(outfit, new_item)`
+
+**File:** `tools.py`
+
+**Inputs:**
+
+* `outfit` (`str`): The outfit suggestion generated by `suggest_outfit`.
+* `new_item` (`dict`): The selected listing.
+
+**Output:**
+
+* `str`: A short social-media-style fit card/caption.
+
+**Purpose:**
+This tool turns the selected item and outfit suggestion into a shareable description, similar to an Instagram or TikTok caption.
+
+**Failure handling:**
+If the outfit string is empty or incomplete, the tool returns a descriptive error message instead of raising an exception.
+
+---
+
+### 4. `compare_price(new_item, similar_items)`
+
+**File:** `tools.py`
+
+**Inputs:**
+
+* `new_item` (`dict`): The selected listing.
+* `similar_items` (`list[dict]`): Comparable listings from the local mock dataset.
+
+**Output:**
+
+* `str`: A short price comparison message.
+
+**Purpose:**
+This stretch tool compares the selected item's price against similar listings in the same category. It returns a simple verdict such as whether the item looks like a good deal, fairly priced, or a bit pricey.
+
+**Failure handling:**
+If there are not enough comparable listings, it returns a helpful message saying there is not enough data for a strong comparison.
+
+---
+
+### 5. `check_trends(description)`
+
+**File:** `tools.py`
+
+**Inputs:**
+
+* `description` (`str`): The user query or selected item description/style text.
+
+**Output:**
+
+* `str`: A short trend note.
+
+**Purpose:**
+This stretch tool checks the query/description against a local list of trend keywords such as `y2k`, `grunge`, `vintage`, `streetwear`, `coquette`, `western`, `goth`, `classic`, and `boho`.
+
+**Failure handling:**
+If no trend keyword is found, it returns a neutral message. It does not use an external API, so it is deterministic and works offline.
+
+## Planning Loop Explanation
+
+The main planning loop lives in `run_agent()` in `agent.py`.
+
+The agent starts by creating a session dictionary. It then parses the user query into:
+
+* `description`
+* `size`
+* `max_price`
+
+The core flow is:
+
+1. Call `search_listings(description, size, max_price)`.
+2. If search returns results:
+
+   * Store the results in `session["search_results"]`.
+   * Select the top result.
+   * Store it in `session["selected_item"]`.
+   * Continue to outfit generation.
+3. If search returns no results and a size was provided:
+
+   * Retry once with `size=None`.
+   * Keep the same description and max price.
+   * If retry succeeds, store a fallback message in `session["fallback_message"]`.
+   * Continue with the fallback results.
+4. If both original search and fallback search fail:
+
+   * Store an error in `session["error"]`.
+   * Return early.
+   * Do not call `suggest_outfit()` or `create_fit_card()`.
+5. If a listing is selected:
+
+   * Call `suggest_outfit(selected_item, wardrobe)`.
+   * Store the result in `session["outfit_suggestion"]`.
+6. If outfit generation succeeds:
+
+   * Call `create_fit_card(outfit_suggestion, selected_item)`.
+   * Store the result in `session["fit_card"]`.
+7. Add stretch-feature information:
+
+   * `session["price_comparison"]`
+   * `session["trend_note"]`
+   * `session["style_profile"]`
+
+The important design decision is that the agent does not call all tools unconditionally. It checks the result of each step before deciding what to do next.
+
+## State Management
+
+The agent uses one session dictionary to pass information between tools.
+
+Main session keys:
+
+```python
+{
+    "query": str,
+    "parsed": dict,
+    "search_results": list,
+    "selected_item": dict | None,
+    "wardrobe": dict,
+    "outfit_suggestion": str | None,
+    "fit_card": str | None,
+    "error": str | None,
+    "fallback_message": str | None,
+    "price_comparison": str | None,
+    "trend_note": str | None,
+    "style_profile": dict | None,
+}
+```
+
+State flow example:
+
+```text
+search_listings()
+        ↓
+session["selected_item"]
+        ↓
+suggest_outfit(selected_item, wardrobe)
+        ↓
+session["outfit_suggestion"]
+        ↓
+create_fit_card(outfit_suggestion, selected_item)
+        ↓
+session["fit_card"]
+```
+
+This allows the selected listing to flow into the outfit tool without the user re-entering it. The generated outfit also flows into the fit card tool without being hardcoded.
+
+## Error Handling Strategy
+
+### `search_listings` no-results case
+
+Tested with:
+
+```text
+designer ballgown size XXS under $5
+```
+
+Result:
+
+* `session["search_results"] == []`
+* `session["selected_item"] is None`
+* `session["outfit_suggestion"] is None`
+* `session["fit_card"] is None`
+* `session["error"]` contains a helpful no-results message.
+
+User-facing message:
+
+```text
+No listings found for that search. Try using a broader description, removing the size filter, or increasing your max price.
+```
+
+The agent stops early and does not call the outfit or fit card tools.
+
+---
+
+### `suggest_outfit` empty wardrobe case
+
+Tested with `get_empty_wardrobe()`.
+
+Instead of crashing or returning nothing, the tool gives general styling advice. This means a new user can still get outfit help even if they have not added wardrobe items yet.
+
+---
+
+### `create_fit_card` empty outfit case
+
+Tested with:
+
+```python
+create_fit_card("", selected_item)
+```
+
+Result:
+The tool returns a descriptive error string explaining that the fit card could not be created because the outfit suggestion was missing or incomplete.
+
+---
+
+### Retry fallback case
+
+Tested with a query where the original size-filtered search fails but the relaxed search succeeds, such as:
+
+```text
+vintage graphic tee size XXS
+```
+
+The agent retries without the size filter and stores:
+
+```python
+session["fallback_message"] = "No exact size match found, so I broadened the search by removing the size filter."
+```
+
+Then it continues the normal flow and still generates an outfit and fit card.
+
+## Stretch Features
+
+### Retry Logic with Fallback
+
+If the original search returns no results and the user provided a size, the agent retries once without the size filter. This helps the user get useful results instead of immediately failing.
+
+Limitation:
+Fallback only triggers when the first search returns zero results. Some loose matches, such as size `8` matching `US 8.5`, can succeed directly without triggering fallback.
+
+### Price Comparison
+
+The agent compares the selected item against similar local listings in the same category. It provides a simple price judgment using the selected item price and the average price of comparable items.
+
+Limitation:
+The comparison uses mock local data only. It does not check live resale prices.
+
+### Trend Awareness
+
+The agent checks the query or selected item against a local list of fashion trend keywords and returns a short trend note.
+
+Limitation:
+This is not live trend data. It is deterministic keyword matching against a fixed list.
+
+### Style Profile Memory
+
+The agent creates a simple session-based style profile from the query, selected item, and wardrobe. It stores preferred styles, preferred colors, and what the profile was based on.
+
+Limitation:
+This memory is session-only and does not persist across app restarts.
+
+## Testing
+
+Automated tests are in `tests/test_tools.py`.
+
+Current test status:
+
+```text
+16 passed
+```
+
+Run tests with:
+
+```bash
+python3 -m pytest tests/
+```
+
+Other manual checks performed:
+
+* Happy-path query flows through all three required tools.
+* No-results query returns a helpful error and stops early.
+* Empty wardrobe still produces useful styling advice.
+* Empty outfit string returns a descriptive fit card error.
+* Retry fallback works when the size-filtered search fails but the relaxed search succeeds.
+* App handler maps session output to Gradio panels correctly.
+
+## Example Interaction
+
+Query:
+
+```text
+vintage graphic tee under $30
+```
+
+Agent flow:
+
+1. Parses description as `"vintage graphic tee"` and max price as `30.0`.
+2. Calls `search_listings("vintage graphic tee", size=None, max_price=30.0)`.
+3. Selects `Graphic Tee — 2003 Tour Bootleg Style`.
+4. Stores the selected item in `session["selected_item"]`.
+5. Calls `suggest_outfit()` with the selected item and the example wardrobe.
+6. Stores the outfit in `session["outfit_suggestion"]`.
+7. Calls `create_fit_card()` with the outfit and selected item.
+8. Stores the caption in `session["fit_card"]`.
+9. Adds price comparison, trend note, and style profile info.
+
+The user sees:
+
+* A top listing
+* An outfit idea
+* A fit card caption
+* Stretch info in the listing panel
+
+## Spec Reflection
+
+One way the spec helped was by forcing the planning loop to be written before coding. The planning document made it clear that the agent should branch after `search_listings()` instead of always calling every tool. This directly shaped the implementation of `run_agent()`.
+
+One way the implementation diverged from the original simple plan was the search ranking and size matching. The first search implementation treated all fields too equally, which caused weaker matches to rank too high. I revised the scoring so style tags and titles matter more than random description mentions. I also improved size matching so a query like size `8` does not accidentally match waist size `W28`.
+
+For stretch features, I kept trend awareness and style memory simple and local. Instead of adding external APIs or persistent storage, I made those features deterministic and easy to test.
+
+## AI Usage
+
+### Instance 1: Implementing the required tools
+
+I used ChatGPT and Claude to help implement the required tool functions in `tools.py`. I gave the AI the tool specs from `planning.md`, including each function's inputs, outputs, and failure mode. The AI helped produce implementations for `search_listings`, `suggest_outfit`, and `create_fit_card`.
+
+Before using the code, I reviewed whether each function matched the required signature, used the provided data loader, and handled its failure case. I revised the search logic after testing showed that weak description matches could rank above stronger style-tag matches.
+
+### Instance 2: Implementing the planning loop
+
+I used ChatGPT to help implement `run_agent()` in `agent.py`. I provided the Planning Loop section, State Management section, and the architecture diagram from `planning.md`. The AI helped translate the planned conditional logic into code.
+
+Before relying on it, I reviewed whether the code:
+
+* branches when `search_listings()` returns no results,
+* stores values in the session dictionary,
+* avoids calling all three tools unconditionally,
+* returns early when no useful listing exists.
+
+I revised indentation and return placement bugs during testing so the agent continued to later steps only when appropriate.
+
+### Instance 3: Implementing stretch features
+
+I used Claude to help add the stretch features after updating `planning.md`. I gave Claude the stretch feature plans and asked it to keep the implementation conservative and local. Claude helped add retry fallback, price comparison, trend awareness, style profile memory, and related tests.
+
+I reviewed the generated code and chose to keep fallback behavior spec-literal: it only triggers when the first search returns zero results. I also rejected changing the required size matching behavior just to force one test query to trigger fallback.
+
+## Demo Evidence
+
+The `demo-evidence/` folder includes screenshots of triggered failure modes:
+
+* `search_listings` zero results
+* Full agent no-results path
+* Empty wardrobe handling
+* Empty outfit string handling
+
+These screenshots support the demo video and show that the agent handles failure modes gracefully.
