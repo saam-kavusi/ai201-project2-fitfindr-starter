@@ -125,7 +125,7 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
 
     Before writing code, fill in the Tool 2 section of planning.md.
     """
-    # Replace this with your implementation
+    
     try:
         client = _get_groq_client()
 
@@ -250,5 +250,75 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
 
     Before writing code, fill in the Tool 3 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+   
+    if not outfit or not outfit.strip():
+        return (
+            "Fit card could not be created because the outfit suggestion was "
+            "missing or incomplete. Try generating the outfit again or choose another listing."
+        )
+
+    try:
+        client = _get_groq_client()
+
+        item_title = new_item.get("title", "this thrifted item")
+        item_price = new_item.get("price", "unknown price")
+        item_platform = new_item.get("platform", "a secondhand platform")
+        item_condition = new_item.get("condition", "unknown condition")
+        item_brand = new_item.get("brand") or "unbranded"
+        item_colors = ", ".join(new_item.get("colors", []))
+        item_style_tags = ", ".join(new_item.get("style_tags", []))
+
+        prompt = f"""
+You are FitFindr, a secondhand fashion styling assistant.
+
+Create a short, shareable outfit caption for this thrifted item and outfit.
+
+Thrifted item:
+- Title: {item_title}
+- Price: ${item_price}
+- Platform: {item_platform}
+- Condition: {item_condition}
+- Brand: {item_brand}
+- Colors: {item_colors}
+- Style tags: {item_style_tags}
+
+Outfit suggestion:
+{outfit}
+
+Write a 2-4 sentence caption that sounds like a real Instagram or TikTok outfit post.
+Mention the item title, price, and platform naturally one time.
+Make it casual, specific, and stylish.
+Do not sound like a product listing.
+"""
+
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You write casual, stylish secondhand outfit captions.",
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            temperature=0.9,
+            max_tokens=180,
+        )
+
+        fit_card = response.choices[0].message.content.strip()
+
+        if not fit_card:
+            return (
+                f"Thrifted {item_title} for ${item_price} on {item_platform}. "
+                f"Styled with a look inspired by {item_style_tags or 'secondhand fashion'}."
+            )
+
+        return fit_card
+
+    except Exception as e:
+        return (
+            f"Thrifted {new_item.get('title', 'this item')} and styled it into a complete fit. "
+            f"Fit card fallback used because the caption generator failed: {str(e)}"
+        )
