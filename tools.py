@@ -35,6 +35,48 @@ def _get_groq_client():
     return Groq(api_key=api_key)
 
 
+def _size_matches(query: str, listing_size: str) -> bool:
+    """Return True if a listing's size satisfies the requested size.
+
+    Sizes come in three flavors in the dataset:
+        - text clothing sizes:  "M", "S/M", "M/L", "XL (oversized)"
+        - shoe sizes:           "US 8", "US 8.5"
+        - waist sizes:          "W28", "W30 L30"
+
+    The naive ``query in listing`` substring check is wrong: it makes "8"
+    match "W28" because "8" appears inside "28". The fix relies on how the
+    formats differ — a shoe-size number is a *standalone* token ("US 8"),
+    while a waist number is fused to a letter ("W28"). So a numeric query
+    only ever matches standalone numeric tokens, and a text query matches on
+    whole tokens rather than substrings.
+    """
+    query = query.strip().lower()
+    listing = str(listing_size).strip().lower()
+
+    if not query:
+        return True
+    if not listing:
+        return False
+
+    # Numeric query (e.g. "8", "8.5"): split into tokens and keep only the
+    # ones that are *purely* numeric. "US 8" → ["us", "8"] keeps "8"; "W28" →
+    # ["w28"] keeps nothing, so a waist size can never satisfy a shoe query.
+    if re.fullmatch(r"\d+(?:\.\d+)?", query):
+        tokens = re.split(r"[^a-z0-9.]+", listing)
+        numeric_tokens = [t for t in tokens if re.fullmatch(r"\d+(?:\.\d+)?", t)]
+        # Exact match, or a half-size like "8.5" satisfying a query of "8".
+        return any(
+            tok == query or tok.startswith(query + ".")
+            for tok in numeric_tokens
+        )
+
+    # Text query (e.g. "M"): compare whole tokens so "M" matches "M" and
+    # "S/M" ({"s", "m"}) but never matches as a substring of another word.
+    query_tokens = {t for t in re.split(r"[^a-z0-9]+", query) if t}
+    listing_tokens = {t for t in re.split(r"[^a-z0-9]+", listing) if t}
+    return query_tokens.issubset(listing_tokens)
+
+
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
 
 def search_listings(
@@ -98,7 +140,7 @@ def search_listings(
             continue
 
         if size is not None:
-            if size.lower() not in str(listing.get("size", "")).lower():
+            if not _size_matches(size, listing.get("size", "")):
                 continue
 
         style_tags = listing.get("style_tags", [])
