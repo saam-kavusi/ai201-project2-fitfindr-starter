@@ -20,7 +20,7 @@ from groq import Groq
 
 from utils.data_loader import load_listings
 
-load_dotenv()
+load_dotenv(dotenv_path=".env")
 
 
 # ── Groq client ───────────────────────────────────────────────────────────────
@@ -126,7 +126,99 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
     Before writing code, fill in the Tool 2 section of planning.md.
     """
     # Replace this with your implementation
-    return ""
+    try:
+        client = _get_groq_client()
+
+        wardrobe_items = wardrobe.get("items", []) if wardrobe else []
+
+        item_title = new_item.get("title", "this item")
+        item_category = new_item.get("category", "clothing")
+        item_colors = ", ".join(new_item.get("colors", []))
+        item_style_tags = ", ".join(new_item.get("style_tags", []))
+        item_description = new_item.get("description", "")
+
+        if not wardrobe_items:
+            prompt = f"""
+You are FitFindr, a secondhand fashion styling assistant.
+
+The user is considering this thrifted item:
+- Title: {item_title}
+- Category: {item_category}
+- Description: {item_description}
+- Colors: {item_colors}
+- Style tags: {item_style_tags}
+
+The user's wardrobe is empty or not available.
+
+Suggest one complete outfit using general clothing pieces that would pair well with this item.
+Do not say you cannot help. Give practical styling advice.
+Keep the response concise, specific, and casual.
+"""
+        else:
+            formatted_wardrobe = []
+
+            for item in wardrobe_items:
+                name = item.get("name", "Unnamed item")
+                category = item.get("category", "unknown category")
+                colors = ", ".join(item.get("colors", []))
+                style_tags = ", ".join(item.get("style_tags", []))
+
+                formatted_wardrobe.append(
+                    f"- {name} | category: {category} | colors: {colors} | style tags: {style_tags}"
+                )
+
+            wardrobe_text = "\n".join(formatted_wardrobe)
+
+            prompt = f"""
+You are FitFindr, a secondhand fashion styling assistant.
+
+The user is considering this thrifted item:
+- Title: {item_title}
+- Category: {item_category}
+- Description: {item_description}
+- Colors: {item_colors}
+- Style tags: {item_style_tags}
+
+The user's wardrobe contains:
+{wardrobe_text}
+
+Suggest 1 complete outfit using the new thrifted item and specific pieces from the user's wardrobe.
+Mention the new item by name.
+Include practical styling details like fit, color balance, shoes, layers, or accessories.
+Keep the response concise, specific, and casual.
+"""
+
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful fashion assistant for secondhand clothing and outfit styling.",
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            temperature=0.7,
+            max_tokens=250,
+        )
+
+        outfit = response.choices[0].message.content.strip()
+
+        if not outfit:
+            return (
+                "I could not generate an outfit suggestion for this item. "
+                "Try adding more wardrobe details or choosing a different listing."
+            )
+
+        return outfit
+
+    except Exception as e:
+        return (
+            "I could not create an outfit suggestion right now. "
+            f"Reason: {str(e)}"
+        )
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
