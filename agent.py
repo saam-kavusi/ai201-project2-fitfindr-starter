@@ -18,8 +18,16 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 import re
+from collections import Counter
 
-from tools import search_listings, suggest_outfit, create_fit_card
+from tools import (
+    search_listings,
+    suggest_outfit,
+    create_fit_card,
+    compare_price,
+    check_trends,
+)
+from utils.data_loader import load_listings
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -43,6 +51,56 @@ def _new_session(query: str, wardrobe: dict) -> dict:
         "outfit_suggestion": None,   # string returned by suggest_outfit
         "fit_card": None,            # string returned by create_fit_card
         "error": None,               # set if the interaction ended early
+
+        # ── stretch features ──────────────────────────────────────────────
+        "fallback_message": None,    # set if the size filter was dropped on retry
+        "price_comparison": None,    # string from compare_price
+        "trend_note": None,          # string from check_trends
+        "style_profile": None,       # dict of inferred style preferences
+    }
+
+
+# ── stretch: style profile memory ──────────────────────────────────────────────
+
+def _build_style_profile(query: str, selected_item: dict, wardrobe: dict) -> dict:
+    """
+    Infer a simple, session-only style profile from the user's query, the
+    selected item's style tags/colors, and the wardrobe items.
+
+    Intentionally lightweight: no persistence, no database. It just tallies the
+    style tags and colors the user keeps gravitating toward and surfaces the
+    most common ones.
+    """
+    style_counts: Counter = Counter()
+    color_counts: Counter = Counter()
+
+    # Signals from the selected listing.
+    for tag in selected_item.get("style_tags", []):
+        style_counts[tag.lower()] += 1
+    for color in selected_item.get("colors", []):
+        color_counts[color.lower()] += 1
+
+    # Signals from the wardrobe.
+    for item in (wardrobe.get("items", []) if wardrobe else []):
+        for tag in item.get("style_tags", []):
+            style_counts[tag.lower()] += 1
+        for color in item.get("colors", []):
+            color_counts[color.lower()] += 1
+
+    # Signals from the query: weight any style tag the user named explicitly.
+    query_lower = (query or "").lower()
+    for tag in list(style_counts.keys()):
+        if re.search(rf"\b{re.escape(tag)}\b", query_lower):
+            style_counts[tag] += 2
+
+    return {
+        "preferred_styles": [tag for tag, _ in style_counts.most_common(3)],
+        "preferred_colors": [color for color, _ in color_counts.most_common(3)],
+        "based_on": {
+            "query": query,
+            "selected_item": selected_item.get("title"),
+            "wardrobe_items": len(wardrobe.get("items", [])) if wardrobe else 0,
+        },
     }
 
 
@@ -149,9 +207,27 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         size=size,
         max_price=max_price,
     )
+
+    # Stretch — retry with fallback: if the first, fully constrained search came
+    # back empty and a size filter was applied, retry once with the size filter
+    # removed (keeping description and max_price). If that finds something, note
+    # what we broadened so the UI/README can explain it.
+    if not results and size is not None:
+        retry_results = search_listings(
+            description=description,
+            size=None,
+            max_price=max_price,
+        )
+        if retry_results:
+            results = retry_results
+            session["fallback_message"] = (
+                "No exact size match found, so I broadened the search by "
+                "removing the size filter."
+            )
+
     session["search_results"] = results
 
-    # Step 3: If no results are found, stop early.
+    # Step 3: If no results are found (even after the fallback), stop early.
     if not results:
         session["error"] = (
             "No listings found for that search. Try using a broader description, "
@@ -162,6 +238,13 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     # Step 4: Select the top result and store it in session state.
     selected_item = results[0]
     session["selected_item"] = selected_item
+
+    # Stretch features — additive context about the selected item. These never
+    # block the core outfit/fit-card flow; they only enrich the session.
+    session["price_comparison"] = compare_price(selected_item, load_listings())
+    trend_source = " ".join([description] + selected_item.get("style_tags", []))
+    session["trend_note"] = check_trends(trend_source)
+    session["style_profile"] = _build_style_profile(query, selected_item, wardrobe)
 
     # Step 5: Suggest an outfit using the selected item and wardrobe.
     outfit_suggestion = suggest_outfit(

@@ -15,8 +15,18 @@ Run with:
 
 import pytest
 
-from tools import search_listings, suggest_outfit, create_fit_card
-from utils.data_loader import get_example_wardrobe, get_empty_wardrobe
+from tools import (
+    search_listings,
+    suggest_outfit,
+    create_fit_card,
+    compare_price,
+    check_trends,
+)
+from utils.data_loader import (
+    get_example_wardrobe,
+    get_empty_wardrobe,
+    load_listings,
+)
 
 
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
@@ -130,3 +140,74 @@ def test_create_fit_card_whitespace_outfit():
 
     assert isinstance(caption, str)
     assert "could not be created" in caption
+
+
+# ── Stretch Tool: compare_price ───────────────────────────────────────────────
+
+def test_compare_price_with_comparables():
+    """Happy path: an item with several same-category comparables returns a
+    string naming a price."""
+    listings = load_listings()
+    tops = [item for item in listings if item.get("category") == "tops"]
+    assert len(tops) >= 3  # the mock dataset has plenty of tops
+
+    result = compare_price(tops[0], listings)
+
+    assert isinstance(result, str)
+    assert "$" in result
+
+
+def test_compare_price_not_enough_data():
+    """Failure mode: no comparable listings returns a helpful message instead
+    of crashing."""
+    item = {"id": "x", "category": "spacesuit", "price": 10.0}
+
+    result = compare_price(item, load_listings())
+
+    assert isinstance(result, str)
+    assert "enough" in result.lower()
+
+
+def test_compare_price_missing_price():
+    """Edge case: an item with no price returns a helpful message, no crash."""
+    item = {"id": "x", "category": "tops"}
+
+    result = compare_price(item, load_listings())
+
+    assert isinstance(result, str)
+    assert "price" in result.lower()
+
+
+# ── Stretch Tool: check_trends ────────────────────────────────────────────────
+
+def test_check_trends_match():
+    """A description containing a trend keyword returns a non-empty note."""
+    result = check_trends("vintage grunge band tee")
+
+    assert isinstance(result, str)
+    assert result.strip() != ""
+
+
+def test_check_trends_no_match():
+    """A description with no trend keyword returns a neutral, non-empty
+    message (and never crashes)."""
+    result = check_trends("plain cotton item")
+
+    assert isinstance(result, str)
+    assert result.strip() != ""
+
+
+def test_check_trends_empty():
+    """An empty description is handled gracefully."""
+    result = check_trends("")
+
+    assert isinstance(result, str)
+    assert result.strip() != ""
+
+
+def test_check_trends_whole_word_only():
+    """Matching is whole-word: 'goth' should not fire inside 'gothic'."""
+    result = check_trends("gothic architecture cathedral")
+
+    # No standalone trend keyword → neutral message, not the goth note.
+    assert "all-black layering" not in result

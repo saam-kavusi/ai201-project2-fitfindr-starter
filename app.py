@@ -78,6 +78,22 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
         f"{description}"
     )
 
+    # Stretch info — appended to the listing panel only when available, so the
+    # layout stays the same for the basic flow.
+    extras = []
+    if session.get("fallback_message"):
+        extras.append(f"ℹ️ {session['fallback_message']}")
+    if session.get("price_comparison"):
+        extras.append(f"💲 Price check: {session['price_comparison']}")
+    if session.get("trend_note"):
+        extras.append(f"📈 Trend: {session['trend_note']}")
+    profile = session.get("style_profile")
+    if profile and profile.get("preferred_styles"):
+        extras.append("🎨 Style profile: " + ", ".join(profile["preferred_styles"]))
+
+    if extras:
+        listing_text = listing_text + "\n\n———\n" + "\n\n".join(extras)
+
     return (
         listing_text,
         session["outfit_suggestion"] or "",

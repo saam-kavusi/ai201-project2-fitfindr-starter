@@ -403,3 +403,114 @@ Do not sound like a product listing.
             f"Thrifted {new_item.get('title', 'this item')} and styled it into a complete fit. "
             f"Fit card fallback used because the caption generator failed: {str(e)}"
         )
+
+
+# ── Stretch Tool: compare_price ─────────────────────────────────────────────────
+
+def compare_price(new_item: dict, similar_items: list[dict]) -> str:
+    """
+    Estimate whether the selected listing's price is fair compared to similar
+    local listings. Uses the mock dataset only — no external API.
+
+    "Comparable" means a *different* listing in the *same category* that has a
+    real numeric price. The verdict is based on how the item's price sits
+    relative to the average of those comparables.
+
+    Args:
+        new_item:      The selected listing dict (needs 'price' and 'category'
+                       to be comparable).
+        similar_items: A list of other listing dicts to compare against,
+                       typically the full local listings list.
+
+    Returns:
+        A short, human-readable string naming the item's price and — when there
+        is enough data — the average comparable price plus a verdict. If there
+        are not enough comparables (or no price), returns a helpful message
+        instead of crashing.
+    """
+    price = new_item.get("price")
+    if not isinstance(price, (int, float)):
+        return "No price is listed for this item, so I can't compare it to similar finds."
+
+    new_id = new_item.get("id")
+    category = new_item.get("category")
+
+    comparables = [
+        item for item in (similar_items or [])
+        if item.get("id") != new_id
+        and item.get("category") == category
+        and isinstance(item.get("price"), (int, float))
+    ]
+
+    # Need at least a couple of comparables for an average to be meaningful.
+    if len(comparables) < 2:
+        return (
+            f"This item is ${price:.0f}. There aren't enough similar "
+            f"{category or 'listings'} to compare against, so I can't judge "
+            "whether that's a good deal yet."
+        )
+
+    avg = sum(item["price"] for item in comparables) / len(comparables)
+
+    if price < avg * 0.9:
+        verdict = "a good deal"
+    elif price > avg * 1.1:
+        verdict = "a bit pricey"
+    else:
+        verdict = "fairly priced"
+
+    return (
+        f"This item is ${price:.0f}, while {len(comparables)} similar "
+        f"{category} listings average ${avg:.0f} — so it looks like {verdict}."
+    )
+
+
+# ── Stretch Tool: check_trends ──────────────────────────────────────────────────
+
+# Local, offline trend map. Intentionally a small static dictionary so the tool
+# is deterministic, testable, and never depends on an external API.
+TREND_NOTES = {
+    "y2k": "Y2K is having a major resurgence — low-rise, shine, and early-2000s nostalgia are everywhere.",
+    "grunge": "Grunge is trending again — flannel, distressed layers, and an effortlessly undone look.",
+    "vintage": "Vintage pieces stay in demand and read as more sustainable and one-of-a-kind.",
+    "streetwear": "Streetwear stays strong — oversized fits and sneaker-forward styling keep it current.",
+    "coquette": "The coquette aesthetic is hot right now — soft, feminine details like bows and lace.",
+    "western": "Western looks are having a moment — boots, suede, and earthy tones are in.",
+    "goth": "Goth-leaning pieces are trending — all-black layering with edgy hardware.",
+    "classic": "Classic, timeless staples never really go out of style and anchor any wardrobe.",
+    "boho": "Boho is back — flowy silhouettes, crochet, and earthy layering feel fresh again.",
+}
+
+
+def check_trends(description: str) -> str:
+    """
+    Check a description against a local list of trend keywords and return a
+    short trend note. No external API is used.
+
+    Args:
+        description: Free text describing the item or search (e.g. the user
+                     query, optionally combined with the item's style tags).
+
+    Returns:
+        A short trend note if one or more trend keywords are found, otherwise a
+        neutral message. Matching is whole-word and case-insensitive so "goth"
+        does not fire on "gothic".
+    """
+    if not description or not description.strip():
+        return "No particular trend stood out for this search."
+
+    text = description.lower()
+    matched = [
+        keyword for keyword in TREND_NOTES
+        if re.search(rf"\b{re.escape(keyword)}\b", text)
+    ]
+
+    if not matched:
+        return "This pick is more of a timeless staple than a trend-driven piece — easy to wear any season."
+
+    # Lead with the first matched trend; if several match, name the rest briefly
+    # so the note stays short.
+    note = TREND_NOTES[matched[0]]
+    if len(matched) > 1:
+        note += " It also overlaps with: " + ", ".join(matched[1:]) + "."
+    return note
