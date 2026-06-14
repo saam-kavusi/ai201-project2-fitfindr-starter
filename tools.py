@@ -59,43 +59,82 @@ def search_listings(
     """
     listings = load_listings()
 
-    query_words = set(re.findall(r"\w+", description.lower()))
+    if not description or not description.strip():
+        return []
+
+    stop_words = {
+        "i", "im", "i'm", "am", "looking", "look", "for", "a", "an", "the",
+        "and", "or", "with", "to", "under", "want", "need", "find", "me",
+        "whats", "what", "out", "there", "how", "would", "style", "it"
+    }
+
+    query_lower = description.lower()
+    query_words = {
+        word for word in re.findall(r"\w+", query_lower)
+        if word not in stop_words
+    }
+
+    if not query_words:
+        return []
+
+    # Per-field weights: a match in a structured field (style tags, title)
+    # is a much stronger signal of what the item *is* than an incidental
+    # mention buried in the free-text description (e.g. "great for layering
+    # under a graphic tee"). Description matches still count, just for less.
+    field_weights = {
+        "style_tags": 5,
+        "title": 4,
+        "category": 3,
+        "colors": 2,
+        "brand": 2,
+        "platform": 1,
+        "description": 1,
+    }
 
     matches = []
 
     for listing in listings:
-        if max_price is not None and listing["price"] > max_price:
+        if max_price is not None and listing.get("price", 0) > max_price:
             continue
 
         if size is not None:
-            requested_size = size.lower()
-            listing_size = listing["size"].lower()
-
-            if requested_size not in listing_size:
+            if size.lower() not in str(listing.get("size", "")).lower():
                 continue
 
-        searchable_text = " ".join([
-            str(listing.get("title", "")),
-            str(listing.get("description", "")),
-            str(listing.get("category", "")),
-            " ".join(listing.get("style_tags", [])),
-            " ".join(listing.get("colors", [])),
-            str(listing.get("brand", "")),
-            str(listing.get("platform", "")),
-        ]).lower()
+        style_tags = listing.get("style_tags", [])
+        fields = {
+            "style_tags": " ".join(style_tags).lower(),
+            "title": str(listing.get("title", "")).lower(),
+            "category": str(listing.get("category", "")).lower(),
+            "colors": " ".join(listing.get("colors", [])).lower(),
+            "brand": str(listing.get("brand") or "").lower(),
+            "platform": str(listing.get("platform", "")).lower(),
+            "description": str(listing.get("description", "")).lower(),
+        }
 
-        listing_words = set(re.findall(r"\w+", searchable_text))
+        # Score word overlap per field, scaled by that field's weight.
+        score = 0
+        for field, text in fields.items():
+            field_words = set(re.findall(r"\w+", text))
+            overlap = len(query_words & field_words)
+            score += overlap * field_weights[field]
 
-        score = len(query_words.intersection(listing_words))
+        # Strong bonus for an exact style-tag phrase match. Style tags may be
+        # multi-word (e.g. "graphic tee", "band tee"); if such a tag appears
+        # verbatim in the query, the listing genuinely *is* that style, so it
+        # should outrank items that only name the phrase in their description.
+        for tag in style_tags:
+            if tag.lower() in query_lower:
+                score += 10
 
         if score == 0:
             continue
 
         matches.append((score, listing))
 
-    matches.sort(key=lambda pair: (-pair[0], pair[1]["price"]))
+    matches.sort(key=lambda pair: (-pair[0], pair[1].get("price", 0)))
 
-    return [listing for score, listing in matches]
+    return [listing for _, listing in matches]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────

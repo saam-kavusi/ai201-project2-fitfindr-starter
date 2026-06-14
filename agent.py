@@ -17,6 +17,7 @@ Usage (once implemented):
     print(result["fit_card"])
     print(result["error"])   # None on success
 """
+import re
 
 from tools import search_listings, suggest_outfit, create_fit_card
 
@@ -92,9 +93,83 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 1: Parse basic search parameters from the user query.
+    query_lower = query.lower()
+
+    # Extract max price from phrases like "under $30", "$30", or "under 30"
+    price_match = re.search(r"(?:under\s*)?\$?(\d+(?:\.\d+)?)", query_lower)
+    max_price = float(price_match.group(1)) if price_match else None
+
+    # Extract size from phrases like "size M" or "size XXS"
+    size_match = re.search(r"\bsize\s+([a-zA-Z0-9./-]+)\b", query_lower)
+    size = size_match.group(1).upper() if size_match else None
+
+    # Remove price and size phrases from the description so search is cleaner.
+    description = query
+    description = re.sub(r"\bunder\s*\$?\d+(?:\.\d+)?\b", "", description, flags=re.IGNORECASE)
+    description = re.sub(r"\$\d+(?:\.\d+)?", "", description)
+    description = re.sub(r"\bsize\s+[a-zA-Z0-9./-]+\b", "", description, flags=re.IGNORECASE)
+    description = description.strip(" ,.-")
+
+    session["parsed"] = {
+        "description": description,
+        "size": size,
+        "max_price": max_price,
+    }
+
+    # Step 2: Search listings first. The rest of the workflow depends on this.
+    results = search_listings(
+        description=description,
+        size=size,
+        max_price=max_price,
+    )
+    session["search_results"] = results
+
+    # Step 3: If no results are found, stop early.
+    if not results:
+        session["error"] = (
+            "No listings found for that search. Try using a broader description, "
+            "removing the size filter, or increasing your max price."
+        )
+        return session
+
+    # Step 4: Select the top result and store it in session state.
+    selected_item = results[0]
+    session["selected_item"] = selected_item
+
+    # Step 5: Suggest an outfit using the selected item and wardrobe.
+    outfit_suggestion = suggest_outfit(
+        new_item=selected_item,
+        wardrobe=wardrobe,
+    )
+    session["outfit_suggestion"] = outfit_suggestion
+
+    # Step 6: If outfit suggestion failed, stop before creating a fit card.
+    if (
+        not outfit_suggestion
+        or not outfit_suggestion.strip()
+        or outfit_suggestion.lower().startswith("i could not create an outfit suggestion")
+        or outfit_suggestion.lower().startswith("i could not generate an outfit suggestion")
+    ):
+        session["error"] = (
+            "Could not create an outfit suggestion. Try adding more wardrobe details "
+            "or choosing another listing."
+        )
+        return session
+
+    # Step 7: Create the final fit card.
+    fit_card = create_fit_card(
+        outfit=outfit_suggestion,
+        new_item=selected_item,
+    )
+    session["fit_card"] = fit_card
+
+    # Step 8: If fit card creation returned an error message, store it as an error.
+    if "could not be created" in fit_card.lower():
+        session["error"] = fit_card
+
     return session
 
 

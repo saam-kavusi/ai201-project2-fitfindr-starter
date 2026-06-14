@@ -122,6 +122,8 @@ If no trend information is available, the tool should return an empty list or a 
 **How does your agent decide which tool to call next?**
 The agent starts by reading the user's query and extracting the item description, size, max price, and any wardrobe/style notes the user included. It then calls search_listings(description, size, max_price) first because the rest of the workflow depends on finding a valid secondhand item.
 
+For query parsing, I use simple regex/string cleanup in `agent.py` to extract `max_price` from dollar amounts or “under” phrases, extract `size` from phrases like “size M”, and use the remaining cleaned text as the item description.
+
 After search_listings runs, the planning loop checks whether the returned results list is empty. If results == [], the agent stores an error message in session["error"] and does not call suggest_outfit or create_fit_card, because there is no selected item to style. If stretch retry logic is enabled, the agent will retry the search one time with loosened constraints, such as setting size=None or removing the max price filter, and it will tell the user what was adjusted.
 
 If search_listings returns one or more listings, the agent selects the first result as the best match and stores it as session["selected_item"] = results[0]. The agent then calls suggest_outfit(new_item=session["selected_item"], wardrobe=wardrobe) to create an outfit suggestion using the selected listing and the user's wardrobe.
