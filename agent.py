@@ -98,19 +98,43 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     # Step 1: Parse basic search parameters from the user query.
     query_lower = query.lower()
 
-    # Extract max price from phrases like "under $30", "$30", or "under 30"
-    price_match = re.search(r"(?:under\s*)?\$?(\d+(?:\.\d+)?)", query_lower)
-    max_price = float(price_match.group(1)) if price_match else None
-
-    # Extract size from phrases like "size M" or "size XXS"
+    # Extract size first from phrases like "size M" or "size 8".
     size_match = re.search(r"\bsize\s+([a-zA-Z0-9./-]+)\b", query_lower)
     size = size_match.group(1).upper() if size_match else None
 
-    # Remove price and size phrases from the description so search is cleaner.
+    # Extract max price only when the query clearly talks about price.
+    # Examples: "under $30", "$30", "under 30", "less than 30"
+    price_match = re.search(
+        r"(?:under|less than|below)\s*\$?(\d+(?:\.\d+)?)|\$(\d+(?:\.\d+)?)",
+        query_lower,
+    )
+
+    max_price = None
+    if price_match:
+        price_value = price_match.group(1) or price_match.group(2)
+        max_price = float(price_value)
+
+    # Remove price and size phrases from the description so search_listings()
+    # receives only the item description.
     description = query
-    description = re.sub(r"\bunder\s*\$?\d+(?:\.\d+)?\b", "", description, flags=re.IGNORECASE)
-    description = re.sub(r"\$\d+(?:\.\d+)?", "", description)
-    description = re.sub(r"\bsize\s+[a-zA-Z0-9./-]+\b", "", description, flags=re.IGNORECASE)
+    description = re.sub(
+        r"\b(?:under|less than|below)\s*\$?\d+(?:\.\d+)?\b",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    )
+    description = re.sub(
+        r"\$\d+(?:\.\d+)?",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    )
+    description = re.sub(
+        r"\bsize\s+[a-zA-Z0-9./-]+\b",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    )
     description = description.strip(" ,.-")
 
     session["parsed"] = {
