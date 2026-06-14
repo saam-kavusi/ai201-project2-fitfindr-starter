@@ -32,6 +32,68 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
         A tuple of three strings:
             (listing_text, outfit_suggestion, fit_card)
         Each string maps to one of the three output panels in the UI.
+    """
+    # 1. Guard against an empty query
+    if not user_query or not user_query.strip():
+        return "Please enter a search query first.", "", ""
+
+    # 2. Select wardrobe based on UI choice
+    if wardrobe_choice == "Empty wardrobe (new user)":
+        wardrobe = get_empty_wardrobe()
+    else:
+        wardrobe = get_example_wardrobe()
+
+    # 3. Run the agent
+    session = run_agent(user_query.strip(), wardrobe)
+
+    # 4. If agent hit an error, show it in first panel only
+    if session["error"]:
+        return session["error"], "", ""
+
+    # 5. Format selected listing
+    item = session["selected_item"]
+
+    if not item:
+        return "No listing was selected.", "", ""
+
+    title = item.get("title", "Untitled listing")
+    price = item.get("price", "N/A")
+    platform = item.get("platform", "Unknown platform")
+    size = item.get("size", "N/A")
+    condition = item.get("condition", "N/A")
+    brand = item.get("brand", "Unknown brand")
+    colors = ", ".join(item.get("colors", [])) if item.get("colors") else "N/A"
+    style_tags = ", ".join(item.get("style_tags", [])) if item.get("style_tags") else "N/A"
+    description = item.get("description", "")
+
+    listing_text = (
+        f"{title}\n\n"
+        f"Price: ${price}\n"
+        f"Platform: {platform}\n"
+        f"Size: {size}\n"
+        f"Condition: {condition}\n"
+        f"Brand: {brand}\n"
+        f"Colors: {colors}\n"
+        f"Style tags: {style_tags}\n\n"
+        f"{description}"
+    )
+
+    return (
+        listing_text,
+        session["outfit_suggestion"] or "",
+        session["fit_card"] or "",
+    )
+    """
+    Called by Gradio when the user submits a query.
+
+    Args:
+        user_query:     The text the user typed into the search box.
+        wardrobe_choice: Either "Example wardrobe" or "Empty wardrobe (new user)".
+
+    Returns:
+        A tuple of three strings:
+            (listing_text, outfit_suggestion, fit_card)
+        Each string maps to one of the three output panels in the UI.
 
     TODO:
         1. Guard against an empty query (return early with an error message).
